@@ -1,32 +1,77 @@
-import { eq } from "drizzle-orm";
-import Elysia from "elysia";
-import type { DB } from "../_worker";
+import { and, eq } from "drizzle-orm";
+import type { DB } from "../context";
 import { feedHashtags, hashtags } from "../db/schema";
+import { Router } from "../core/router";
+import type { Context } from "../core/types";
 
-export const TagService = (db: DB) => new Elysia({ aot: false })
-    .group('/tag', (group) =>
-        group
-            .get('/', async () => {
-                const tag_list = await db.query.hashtags.findMany();
-                return tag_list;
-            })
-            .get('/:name', async ({ set, params: { name } }) => {
-                const tag = await db.query.hashtags.findFirst({
-                    where: eq(hashtags.name, name),
-                    with: { feeds: true }
-                });
-                if (!tag) {
-                    set.status = 404;
-                    return 'Not found';
+export function TagService(router: Router): void {
+    router.group('/tag', (group) => {
+        // GET /tag
+        group.get('/', async (ctx: Context) => {
+            const { store: { db } } = ctx;
+            
+            const tag_list = await db.query.hashtags.findMany({
+                with: {
+                    feeds: { columns: { feedId: true } }
                 }
-                return tag;
-            })
-    );
+            });
+            
+            return tag_list.map((tag) => ({
+                ...tag,
+                feeds: tag.feeds.length
+            }));
+        });
 
+        // GET /tag/:name
+        group.get('/:name', async (ctx: Context) => {
+            const { admin, set, params, store: { db } } = ctx;
+            const nameDecoded = decodeURI(params.name);
+            
+            const tag = await db.query.hashtags.findFirst({
+                where: eq(hashtags.name, nameDecoded),
+                with: {
+                    feeds: {
+                        with: {
+                            feed: {
+                                columns: {
+                                    id: true, title: true, summary: true, content: true, 
+                                    createdAt: true, updatedAt: true, draft: false, listed: false
+                                },
+                                with: {
+                                    user: { columns: { id: true, username: true, avatar: true } },
+                                    hashtags: {
+                                        columns: {},
+                                        with: { hashtag: { columns: { id: true, name: true } } }
+                                    }
+                                },
+                                where: (feeds: any) => admin ? undefined : and(eq(feeds.draft, 0), eq(feeds.listed, 1))
+                            } as any
+                        }
+                    }
+                }
+            });
+            
+            const tagFeeds = tag?.feeds.map((tag: any) => {
+                if (!tag.feed) return null;
+                return {
+                    ...tag.feed,
+                    hashtags: tag.feed.hashtags.map((tag: any) => tag.hashtag)
+                };
+            }).filter((feed: any) => feed !== null);
+            
+            if (!tag) {
+                set.status = 404;
+                return 'Not found';
+            }
+            
+            return { ...tag, feeds: tagFeeds };
+        });
+    });
+}
 
 export async function bindTagToPost(db: DB, feedId: number, tags: string[]) {
-    await db.delete(feedHashtags).where(
-        eq(feedHashtags.feedId, feedId));
+    await db.delete(feedHashtags).where(eq(feedHashtags.feedId, feedId));
+    
     for (const tag of tags) {
         const tagId = await getTagIdOrCreate(db, tag);
         await db.insert(feedHashtags).values({
@@ -41,13 +86,11 @@ async function getTagByName(db: DB, name: string) {
 }
 
 async function getTagIdOrCreate(db: DB, name: string) {
-    const tag = await getTagByName(db, name)
+    const tag = await getTagByName(db, name);
     if (tag) {
         return tag.id;
     } else {
-        const result = await db.insert(hashtags).values({
-            name
-        }).returning({ insertedId: hashtags.id });
+        const result = await db.insert(hashtags).values({ name }).returning({ insertedId: hashtags.id });
         if (result.length === 0) {
             throw new Error('Failed to insert');
         } else {

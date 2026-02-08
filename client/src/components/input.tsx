@@ -1,18 +1,40 @@
-import { Cache, Keys } from "../page/writing"
+import { forwardRef } from "react";
 
-export function Input({ value, setValue, className, placeholder, id, name }: { value: string, className?: string, placeholder: string, id?: number, name?: Keys, setValue: React.Dispatch<React.SetStateAction<string>> }) {
-    return (<input type='text'
-        placeholder={placeholder}
-        value={value}
-        onChange={(event) => {
-            setValue(event.target.value)
-            if (name)
-                Cache.with(id).set(name, event.target.value)
-        }}
-        className={'w-full py-2 px-4 rounded-xl bg-w ' + className} />
-    )
+interface InputProps {
+    autofocus?: boolean;
+    value: string;
+    className?: string;
+    placeholder: string;
+    id?: number;
+    setValue: (v: string) => void;
+    onSubmit?: () => void;
+    disabled?: boolean;
+    type?: string;
 }
-export function Checkbox({ value, setValue, className, placeholder }: { value: boolean, className?: string, placeholder: string, id: string, setValue: React.Dispatch<React.SetStateAction<boolean>> }) {
+
+export const Input = forwardRef<HTMLInputElement, InputProps>(
+    ({ autofocus, value, setValue, className, placeholder, onSubmit, disabled, type = "text" }, ref) => {
+        return (<input
+            ref={ref}
+            type={type}
+            disabled={disabled}
+            autoFocus={autofocus}
+            placeholder={placeholder}
+            value={value}
+            onKeyDown={(event) => {
+                if (event.key === 'Enter' && onSubmit) {
+                    onSubmit()
+                }
+            }}
+            onChange={(event) => {
+                setValue(event.target.value)
+            }}
+            className={'focus-visible:outline-none bg-secondary focus-visible:outline-theme w-full py-2 px-4 rounded-xl bg-w t-primary disabled:opacity-50 disabled:cursor-not-allowed ' + className} />
+        )
+    }
+);
+export function Checkbox({ value, setValue, className, placeholder }:
+    { value: boolean, className?: string, placeholder: string, id: string, setValue: React.Dispatch<React.SetStateAction<boolean>> }) {
     return (<input type='checkbox'
         placeholder={placeholder}
         checked={value}
